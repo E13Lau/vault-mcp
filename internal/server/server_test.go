@@ -88,11 +88,11 @@ func assertTools(t *testing.T, ctx context.Context, s *mcp.ClientSession, readOn
 		names = append(names, tool.Name)
 	}
 	sort.Strings(names)
-	want := []string{"get_vault_guide", "read_multiple_notes", "read_note"}
+	want := []string{"get_vault_guide", "read_multiple_notes", "read_note", "get_frontmatter", "get_note_outline", "read_note_lines", "get_summary", "list_directory", "get_notes_info", "get_vault_stats", "resolve_wikilink", "list_all_tags"}
 	if !readOnly {
-		want = append(want, "write_note", "patch_note", "delete_note", "move_note", "move_file")
-		sort.Strings(want)
+		want = append(want, "write_note", "patch_note", "delete_note", "move_note", "move_file", "update_frontmatter", "manage_tags")
 	}
+	sort.Strings(want)
 	if !reflect.DeepEqual(names, want) {
 		t.Fatalf("tools=%v want=%v", names, want)
 	}
@@ -227,7 +227,7 @@ func TestReadOnlyMCP(t *testing.T) {
 	ctx := testContext(t)
 	s := connect(t, ctx, &mcp.StreamableClientTransport{Endpoint: h.URL + "/mcp", DisableStandaloneSSE: true})
 	assertTools(t, ctx, s, true)
-	for _, name := range []string{"write_note", "patch_note", "delete_note", "move_note", "move_file"} {
+	for _, name := range []string{"write_note", "patch_note", "delete_note", "move_note", "move_file", "update_frontmatter", "manage_tags"} {
 		_, err := s.CallTool(ctx, &mcp.CallToolParams{Name: name, Arguments: map[string]any{}})
 		if err == nil {
 			t.Errorf("read-only server exposes %s", name)

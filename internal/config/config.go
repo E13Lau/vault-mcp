@@ -14,9 +14,9 @@ import (
 )
 
 type Config struct {
-	Vault, Transport, Listen, Token string
-	ReadOnly                        bool
-	Exclude                         []string
+	Vault, Transport, Listen, Token, IndexFile string
+	ReadOnly                                   bool
+	Exclude                                    []string
 }
 
 func Parse(args []string, getenv func(string) string, output io.Writer) (Config, error) {
@@ -37,6 +37,7 @@ func Parse(args []string, getenv func(string) string, output io.Writer) (Config,
 	f.StringVar(&c.Transport, "transport", value("TRANSPORT", "stdio"), "stdio or http")
 	f.StringVar(&c.Listen, "listen", value("LISTEN", "127.0.0.1:8080"), "HTTP listen address")
 	f.StringVar(&c.Token, "token", value("TOKEN", ""), "HTTP Bearer token (prefer VAULT_MCP_TOKEN)")
+	f.StringVar(&c.IndexFile, "index-file", value("INDEX_FILE", "index.md"), "vault-relative Markdown index used for L0 summaries")
 	f.BoolVar(&c.ReadOnly, "read-only", ro, "do not register or execute write tools")
 	var excludes string
 	f.StringVar(&excludes, "exclude", value("EXCLUDE", ""), "comma-separated vault-relative doublestar globs")

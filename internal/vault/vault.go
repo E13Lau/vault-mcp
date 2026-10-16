@@ -10,11 +10,11 @@ import (
 	"io/fs"
 	"os"
 	"path"
-	"regexp"
 	"strings"
 	"sync"
 	"unicode/utf8"
 
+	"github.com/E13Lau/vault-mcp/internal/index"
 	"github.com/bmatcuk/doublestar/v4"
 )
 
@@ -26,10 +26,12 @@ var (
 )
 
 type Vault struct {
-	root     *os.Root
-	exclude  []string
-	readOnly bool
-	writes   sync.Mutex
+	root      *os.Root
+	exclude   []string
+	readOnly  bool
+	writes    sync.Mutex
+	catalog   *index.Cache
+	indexFile string
 }
 
 func Open(dir string, exclude []string, readOnly bool) (*Vault, error) {
@@ -42,7 +44,9 @@ func Open(dir string, exclude []string, readOnly bool) (*Vault, error) {
 	if err != nil {
 		return nil, safeError("open vault", err)
 	}
-	return &Vault{root: r, exclude: append([]string(nil), exclude...), readOnly: readOnly}, nil
+	v := &Vault{root: r, exclude: append([]string(nil), exclude...), readOnly: readOnly, indexFile: "index.md"}
+	v.catalog = index.New(v)
+	return v, nil
 }
 
 func (v *Vault) Close() error   { return v.root.Close() }
@@ -215,6 +219,7 @@ func (v *Vault) atomicWrite(name, content string) error {
 	if err := parent.Rename(tmp, path.Base(name)); err != nil {
 		return safeError("replace note", err)
 	}
+	v.catalog.Forget(name)
 	return nil
 }
 
@@ -281,6 +286,7 @@ func (v *Vault) DeleteNote(ctx context.Context, name string) error {
 		if err := v.root.Remove(n); err != nil {
 			return safeError("delete note", err)
 		}
+		v.catalog.Forget(n)
 		return nil
 	})
 }
@@ -307,6 +313,8 @@ func (v *Vault) move(from, to string) error {
 	if err := v.root.Rename(from, to); err != nil {
 		return safeError("move file", err)
 	}
+	v.catalog.Forget(from)
+	v.catalog.Forget(to)
 	return nil
 }
 
@@ -324,10 +332,8 @@ func (v *Vault) MoveFile(ctx context.Context, from, to string) error {
 	})
 }
 
-var wikiLink = regexp.MustCompile(`\[\[([^\]\n]+)\]\]`)
-
-// MoveNote returns conservative backlinks (including ambiguous suffix matches).
-// It does not edit referring files. Markdown indexing is added in the next PR.
+// MoveNote uses the shared wikilink index, including ambiguous candidates.
+// Unreadable notes are skipped by the index. Referring files are unchanged.
 func (v *Vault) MoveNote(ctx context.Context, from, to string) ([]string, error) {
 	refs := []string{}
 	err := v.mutate(ctx, func() error {
@@ -339,28 +345,11 @@ func (v *Vault) MoveNote(ctx context.Context, from, to string) ([]string, error)
 		if err != nil {
 			return err
 		}
-		files, err := v.NotePaths()
+		snapshot, err := v.catalog.Snapshot(ctx)
 		if err != nil {
 			return err
 		}
-		target := strings.TrimSuffix(a, path.Ext(a))
-		for _, file := range files {
-			if err := ctx.Err(); err != nil {
-				return err
-			}
-			text, err := v.ReadNote(file)
-			if err != nil {
-				return err
-			}
-			for _, match := range wikiLink.FindAllStringSubmatch(text, -1) {
-				link := strings.TrimSpace(strings.SplitN(strings.SplitN(match[1], "|", 2)[0], "#", 2)[0])
-				link = strings.TrimSuffix(link, ".md")
-				if link != "" && (target == link || strings.HasSuffix(target, "/"+link) || path.Join(path.Dir(file), link) == target) {
-					refs = append(refs, file)
-					break
-				}
-			}
-		}
+		refs = append(refs, snapshot.Backlinks[a]...)
 		return v.move(a, b)
 	})
 	return refs, err
@@ -370,22 +359,7 @@ func (v *Vault) MoveNote(ctx context.Context, from, to string) ([]string, error)
 // excluded, symlink and non-regular entries are never exposed.
 func (v *Vault) NotePaths() ([]string, error) {
 	files := []string{}
-	err := fs.WalkDir(v.root.FS(), ".", func(name string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return safeError("walk vault", err)
-		}
-		if name == "." {
-			return nil
-		}
-		if _, err := v.check(name, false); err != nil {
-			if errors.Is(err, ErrDenied) {
-				if d.IsDir() {
-					return fs.SkipDir
-				}
-				return nil
-			}
-			return err
-		}
+	err := v.walk(".", func(name string, d fs.DirEntry) error {
 		if !d.IsDir() && d.Type().IsRegular() && strings.EqualFold(path.Ext(name), ".md") {
 			files = append(files, name)
 		}

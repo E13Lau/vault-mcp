@@ -5,9 +5,9 @@ between agents over Streamable HTTP, or serves one client over stdio. It uses
 the [official MCP Go SDK](https://github.com/modelcontextprotocol/go-sdk).
 It never runs git commands. Version control belongs to an external process.
 
-This is the first of three implementation stages for v0.1. It provides file
-operations, vault rules, transport, and security. Markdown metadata, directory
-summaries, and search follow in later PRs. There is no RAG or vector index.
+This is the second of three implementation stages for v0.1. It provides 19
+tools for files, Markdown metadata, summaries, links, and tags. Keyword search
+and release builds follow in PR3. There is no RAG or vector index.
 
 ## Build and run
 
@@ -39,29 +39,90 @@ Flags override environment variables. Use `--help` for flag descriptions.
 | `--token` | `VAULT_MCP_TOKEN` | Empty; prefer the environment variable |
 | `--read-only` | `VAULT_MCP_READ_ONLY` | `false` |
 | `--exclude` | `VAULT_MCP_EXCLUDE` | Empty; comma-separated doublestar globs |
+| `--index-file` | `VAULT_MCP_INDEX_FILE` | `index.md`; vault-relative summary index |
 
 Example: `--exclude 'raw/assets/**,private/**'`. Patterns and all tool paths
 are relative to the vault and use `/`. Excluding a directory also excludes
 its descendants. The rules file is subject to the same exclusions.
 
-## Available tools (stage 1)
+## Available tools (stage 2)
 
 | Tool | Behavior |
 | --- | --- |
 | `read_note` | Read one UTF-8 `.md` file |
 | `read_multiple_notes` | Read 1–50 notes; return an error per failed path |
 | `get_vault_guide` | Return the current full rules file |
+| `get_note_outline` | L1: headings with levels and original line numbers; ignore fenced code |
+| `read_note_lines` | L2: inclusive 1-based range, at most 2,000 lines; clamp end at EOF |
+| `get_frontmatter` | Read YAML metadata; invalid YAML returns an error |
+| `get_summary` | L0: summaries and sources for 1–50 paths |
+| `list_directory` | Paginated notes and subdirectories with metadata and optional L0 summaries |
+| `get_notes_info` | Metadata, size, modified time, line/link counts and backlinks for 1–50 paths |
+| `get_vault_stats` | Accessible note, directory, attachment, byte, tag and wikilink counts |
+| `resolve_wikilink` | Resolve shortest note paths; return all ambiguous candidates |
+| `list_all_tags` | Frontmatter and inline tags, with note counts and paths |
 | `write_note` | `overwrite` (default), `append`, or `prepend`; create missing parents |
 | `patch_note` | Replace a nonempty fragment that occurs exactly once |
 | `delete_note` | Permanently delete one note |
-| `move_note` | Move a note; return conservative wikilink references, including ambiguous matches |
+| `move_note` | Move a note; return indexed wikilink references, including ambiguous matches |
 | `move_file` | Move one file, including binary attachments |
+| `update_frontmatter` | Atomically add/replace `fields` and delete fields named in `remove` |
+| `manage_tags` | Atomically `add`, `remove`, or `set` frontmatter tags; inline tags stay unchanged |
 
-Read-only mode registers only the first three tools. The storage layer also
+Read-only mode registers only the twelve read tools. The storage layer also
 rejects writes in this mode. Moves reject existing destinations and directories.
 `move_note` leaves referring files unchanged. `move_file` does not scan backlinks.
 Writes insert exactly the supplied content, with no added newline or separator.
 Notes must be valid UTF-8 and at most 16 MiB, including the result of an append.
+
+## Markdown, summaries, and browsing
+
+Frontmatter updates use YAML nodes to locate changed top-level fields. All
+other fields retain their original bytes, including quotes, spacing, comments,
+field order, list formatting, and CRLF. The Markdown body stays byte-for-byte
+unchanged. Invalid YAML or an update that leaves a dangling YAML alias is
+rejected before writing. A flow-style **root** mapping (`{title: ..., tags: ...}`)
+can be read but cannot be edited without reformatting; the tool returns an
+error. Nested flow mappings and sequences in ordinary block-style frontmatter
+are supported.
+
+`get_summary` uses the first nonempty source in this order:
+
+1. Frontmatter `summary`, then `description` (`source: "frontmatter"`).
+2. Text after the note's wikilink in the configured index (`source: "index"`).
+   Leading `—`, `-`, `:`, or `：` separators are removed.
+3. The first body paragraph, limited to 120 Unicode characters (`source: "body"`).
+
+The catalog parses notes once and checks modification time and size before
+queries. Index links, summary text and resolved summaries are cached. Writes
+invalidate affected entries; external edits are picked up on the next query.
+No model is called. Non-UTF-8 or oversized notes are skipped by the text index
+and reported in vault stats. Such a note does not prevent moving another note.
+Invalid YAML is reported per note instead of silently replacing its metadata.
+
+Example calls:
+
+```json
+{"name":"get_summary","arguments":{"paths":["wiki/concepts/example.md"]}}
+{"name":"list_directory","arguments":{"path":"wiki/concepts","depth":1,"limit":50}}
+{"name":"resolve_wikilink","arguments":{"link":"[[概念#标题|别名]]","source_path":"wiki/start.md"}}
+{"name":"update_frontmatter","arguments":{"path":"note.md","fields":{"summary":"A short description"},"remove":["obsolete"]}}
+{"name":"manage_tags","arguments":{"path":"note.md","action":"add","tags":["开发/iOS"]}}
+```
+
+Directory defaults are root path, depth 1, summaries included, and limit 100.
+Depth is at most 10 and limit at most 500. A directory row includes its recursive
+count of accessible Markdown files. Note titles use frontmatter `title`, falling
+back to the filename without `.md`. Pass `next_cursor` back as `cursor` with
+the same path, depth, and summary setting. A changed vault or directory makes
+the cursor stale; restart pagination. Set `include_summary: false` to omit L0.
+
+Wikilinks support `[[name]]`, `[[folder/name]]`, `[[name|alias]]`, `[[name#heading]]`,
+`![[name]]`, and explicit `./` / `../` paths relative to `source_path`. Duplicate
+filenames return every matching suffix candidate. Full vault-relative paths
+take priority over suffix matches. Code and HTML comments do not create links
+or tags. Tags support Chinese and `/` hierarchy. `manage_tags` edits only the
+frontmatter field; use `list_all_tags` to see inline tags as well.
 
 ## Vault rules
 
@@ -149,8 +210,13 @@ An optional test checks a disposable Brain copy without printing or committing
 its content:
 
 ```sh
-VAULT_MCP_ACCEPTANCE_VAULT=/path/to/Brain-copy go test ./internal/server -run TestBrainGuide -v
+VAULT_MCP_ACCEPTANCE_VAULT=/path/to/Brain-copy go test ./internal/server -run TestBrain -v
 ```
+
+The copy must contain the root files and `wiki/concepts` for Markdown acceptance.
+The test checks index-sourced summaries and pagination, then verifies frontmatter
+priority on a temporary copy of a real note. Brain contents are never committed
+or printed.
 
 ## References and license
 
