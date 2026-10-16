@@ -20,3 +20,16 @@ jobs:
       - run: go test -race ./...
       - run: go vet ./...
       - run: make build
+  cross-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+      - run: make release
+      - uses: actions/upload-artifact@v4
+        with:
+          name: vault-mcp-binaries
+          path: dist/*

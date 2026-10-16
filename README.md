@@ -5,13 +5,17 @@ between agents over Streamable HTTP, or serves one client over stdio. It uses
 the [official MCP Go SDK](https://github.com/modelcontextprotocol/go-sdk).
 It never runs git commands. Version control belongs to an external process.
 
-This is the second of three implementation stages for v0.1. It provides 19
-tools for files, Markdown metadata, summaries, links, and tags. Keyword search
-and release builds follow in PR3. There is no RAG or vector index.
+It provides 20 tools for files, Markdown metadata, layered summaries, links,
+tags, and keyword search. There is no RAG or vector index.
 
-## Build and run
+## Install
+
+Download `vault-mcp-<os>-<arch>` from the GitHub release (darwin or linux; amd64
+or arm64), check it against `SHA256SUMS`, and `chmod +x` it. Or build from source:
 
 Use Go 1.25.6 or newer. The build does not need a C compiler.
+
+## Build and run
 
 ```sh
 make build
@@ -45,7 +49,7 @@ Example: `--exclude 'raw/assets/**,private/**'`. Patterns and all tool paths
 are relative to the vault and use `/`. Excluding a directory also excludes
 its descendants. The rules file is subject to the same exclusions.
 
-## Available tools (stage 2)
+## Available tools
 
 | Tool | Behavior |
 | --- | --- |
@@ -61,6 +65,7 @@ its descendants. The rules file is subject to the same exclusions.
 | `get_vault_stats` | Accessible note, directory, attachment, byte, tag and wikilink counts |
 | `resolve_wikilink` | Resolve shortest note paths; return all ambiguous candidates |
 | `list_all_tags` | Frontmatter and inline tags, with note counts and paths |
+| `search_notes` | BM25 keyword search with Chinese support and path, tag and frontmatter filters |
 | `write_note` | `overwrite` (default), `append`, or `prepend`; create missing parents |
 | `patch_note` | Replace a nonempty fragment that occurs exactly once |
 | `delete_note` | Permanently delete one note |
@@ -69,7 +74,7 @@ its descendants. The rules file is subject to the same exclusions.
 | `update_frontmatter` | Atomically add/replace `fields` and delete fields named in `remove` |
 | `manage_tags` | Atomically `add`, `remove`, or `set` frontmatter tags; inline tags stay unchanged |
 
-Read-only mode registers only the twelve read tools. The storage layer also
+Read-only mode registers only the thirteen read tools. The storage layer also
 rejects writes in this mode. Moves reject existing destinations and directories.
 `move_note` leaves referring files unchanged. `move_file` does not scan backlinks.
 Writes insert exactly the supplied content, with no added newline or separator.
@@ -123,6 +128,31 @@ filenames return every matching suffix candidate. Full vault-relative paths
 take priority over suffix matches. Code and HTML comments do not create links
 or tags. Tags support Chinese and `/` hierarchy. `manage_tags` edits only the
 frontmatter field; use `list_all_tags` to see inline tags as well.
+
+## Search
+
+`search_notes` takes space-separated keywords. A note must match every keyword
+(AND) and results are ranked by BM25 (k1 = 1.2, b = 0.75). Title, path and tag
+hits count extra, and a keyword that appears as a whole substring adds a bonus,
+more so in the title. Text is lowercased. Latin and digit runs are words. Chinese,
+Japanese and Korean text is indexed as single characters and adjacent pairs
+(bigrams), so no word segmentation is needed: `独立开发` matches the pairs
+`独立`, `立开`, `开发`, and `iOS崩溃率` requires `ios`, `崩溃`, and `溃率`.
+A single-character keyword matches that character.
+
+| Argument | Meaning |
+| --- | --- |
+| `query` | Required keywords |
+| `path_prefix` | Only paths that start with this prefix, such as `wiki/` |
+| `tag` | A tag; nested children (`dev` matches `dev/ios`) also match |
+| `frontmatter` | Field/value pairs; a list field matches if it contains the value |
+| `limit` | 1–100, default 20 |
+
+Each result has `path`, `title`, `score`, `type`, `tags` and a `snippet` around the
+first match. `total` counts all matches before `limit`. Nothing is indexed at
+startup: the first query tokenizes the notes (about 2.4 s for 1,765 notes), and
+later queries reuse the cached terms and only retokenize notes changed on disk.
+Typical queries on that vault take 0.2–0.4 s. Excluded and hidden files are never searched.
 
 ## Vault rules
 
@@ -203,7 +233,9 @@ make build                  # CGO_ENABLED=0 binary
 go test ./...               # includes real stdio and HTTP MCP client tests
 ```
 
-CI runs the checks on Linux and macOS. Tests cover traversal and symlink escapes,
+CI runs the checks on Linux and macOS, and cross-compiles darwin/linux for
+amd64 and arm64. Pushing a tag such as `v0.1.0` publishes those four binaries
+and a `SHA256SUMS` file as a GitHub release. Tests cover traversal and symlink escapes,
 hidden and excluded files, HTTP authentication, guide refresh, read-only tool
 registration, atomic replacement, and ten concurrent appends from separate clients.
 An optional test checks a disposable Brain copy without printing or committing

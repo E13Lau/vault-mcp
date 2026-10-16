@@ -15,6 +15,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/E13Lau/vault-mcp/internal/index"
+	"github.com/E13Lau/vault-mcp/internal/search"
 	"github.com/bmatcuk/doublestar/v4"
 )
 
@@ -32,6 +33,8 @@ type Vault struct {
 	writes    sync.Mutex
 	catalog   *index.Cache
 	indexFile string
+	searchMu  sync.Mutex
+	searchDoc map[*index.Entry]*search.Doc
 }
 
 func Open(dir string, exclude []string, readOnly bool) (*Vault, error) {

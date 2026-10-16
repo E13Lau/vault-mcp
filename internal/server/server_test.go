@@ -88,7 +88,7 @@ func assertTools(t *testing.T, ctx context.Context, s *mcp.ClientSession, readOn
 		names = append(names, tool.Name)
 	}
 	sort.Strings(names)
-	want := []string{"get_vault_guide", "read_multiple_notes", "read_note", "get_frontmatter", "get_note_outline", "read_note_lines", "get_summary", "list_directory", "get_notes_info", "get_vault_stats", "resolve_wikilink", "list_all_tags"}
+	want := []string{"get_vault_guide", "read_multiple_notes", "read_note", "get_frontmatter", "get_note_outline", "read_note_lines", "get_summary", "list_directory", "get_notes_info", "get_vault_stats", "resolve_wikilink", "list_all_tags", "search_notes"}
 	if !readOnly {
 		want = append(want, "write_note", "patch_note", "delete_note", "move_note", "move_file", "update_frontmatter", "manage_tags")
 	}
