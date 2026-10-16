@@ -117,16 +117,16 @@ func ParseLink(input string) (Link, error) {
 
 var wikiPattern = regexp.MustCompile(`!?\[\[([^\]\n]+)\]\]`)
 
-// visible masks fenced/indented code, inline code, and HTML comments without
-// changing byte offsets. The AST handles fence lengths and nested block quotes.
+// visible keeps rendered text at its source offsets. Link destinations, image
+// alt text, code, and raw HTML cannot create tags or wikilinks.
 func visible(body string) []byte {
 	source := []byte(body)
-	masked := append([]byte(nil), source...)
-	mask := func(a, b int) {
-		for i := a; i < b; i++ {
-			if masked[i] != '\n' {
-				masked[i] = ' '
-			}
+	masked := make([]byte, len(source))
+	for i, b := range source {
+		if b == '\n' {
+			masked[i] = '\n'
+		} else {
+			masked[i] = ' '
 		}
 	}
 	root := goldmark.DefaultParser().Parse(text.NewReader(source))
@@ -135,36 +135,14 @@ func visible(body string) []byte {
 			return ast.WalkContinue, nil
 		}
 		switch n.Kind() {
-		case ast.KindFencedCodeBlock, ast.KindCodeBlock, ast.KindHTMLBlock:
-			for i := 0; i < n.Lines().Len(); i++ {
-				s := n.Lines().At(i)
-				mask(s.Start, s.Stop)
-			}
+		case ast.KindFencedCodeBlock, ast.KindCodeBlock, ast.KindHTMLBlock, ast.KindCodeSpan, ast.KindImage:
 			return ast.WalkSkipChildren, nil
-		case ast.KindCodeSpan:
-			for c := n.FirstChild(); c != nil; c = c.NextSibling() {
-				if t, ok := c.(*ast.Text); ok {
-					mask(t.Segment.Start, t.Segment.Stop)
-				}
-			}
+		}
+		if t, ok := n.(*ast.Text); ok {
+			copy(masked[t.Segment.Start:t.Segment.Stop], source[t.Segment.Start:t.Segment.Stop])
 		}
 		return ast.WalkContinue, nil
 	})
-	for start := 0; start < len(masked); {
-		i := strings.Index(string(masked[start:]), "<!--")
-		if i < 0 {
-			break
-		}
-		i += start
-		j := strings.Index(string(masked[i+4:]), "-->")
-		if j < 0 {
-			mask(i, len(masked))
-			break
-		}
-		j += i + 7
-		mask(i, j)
-		start = j
-	}
 	return masked
 }
 

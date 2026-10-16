@@ -127,3 +127,17 @@ func TestWikilinkCandidates(t *testing.T) {
 		}
 	}
 }
+
+func TestLinkDestinationsDoNotCreateMetadata(t *testing.T) {
+	doc, err := Parse("[section](#not-a-tag) [remote](https://example.com/[[not-a-note]]) ![#not-an-image-tag](image.png)\n\n#real-tag [[real-note]]\n\n[reference][id]\n\n[id]: #not-a-reference-tag\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := Tags(doc); !reflect.DeepEqual(got, []string{"real-tag"}) {
+		t.Fatalf("destinations became tags: %v", got)
+	}
+	links := Links(doc.Body)
+	if len(links) != 1 || links[0].Target != "real-note" {
+		t.Fatalf("destinations became wikilinks: %+v", links)
+	}
+}
