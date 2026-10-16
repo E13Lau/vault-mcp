@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/E13Lau/vault-mcp/internal/vault"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -170,4 +171,36 @@ func TestBrainMarkdown(t *testing.T) {
 		t.Fatal("real Brain note frontmatter priority failed")
 	}
 	t.Logf("Brain concepts verified: %d notes, %d index summaries, %d existing frontmatter summaries; temporary Brain note summary override passed; no contents logged", len(paths), indexed, metadata)
+}
+
+// TestBrainSearch checks the Chinese acceptance keywords against a disposable
+// Brain copy. It logs only counts, paths and timings.
+func TestBrainSearch(t *testing.T) {
+	dir := os.Getenv("VAULT_MCP_ACCEPTANCE_VAULT")
+	if dir == "" {
+		t.Skip("set VAULT_MCP_ACCEPTANCE_VAULT to a disposable Brain checkout")
+	}
+	v, err := vault.Open(dir, nil, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { v.Close() })
+	ctx := context.Background()
+	start := time.Now()
+	if err := v.Refresh(ctx); err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("catalog build: %s", time.Since(start))
+	for i, q := range []string{"闪念", "独立开发", "iOS崩溃率", "闪念"} {
+		start = time.Now()
+		res, err := v.Search(ctx, vault.SearchOptions{Query: q, Limit: 3})
+		if err != nil || res.Total == 0 {
+			t.Fatalf("%q: total=%d err=%v", q, res.Total, err)
+		}
+		paths := []string{}
+		for _, r := range res.Results {
+			paths = append(paths, r.Path)
+		}
+		t.Logf("run %d %q: %d notes in %s, top %v", i, q, res.Total, time.Since(start), paths)
+	}
 }

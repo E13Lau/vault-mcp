@@ -260,3 +260,50 @@ func TestConcurrentCatalogReadsAndMetadataWrites(t *testing.T) {
 	}
 	wg.Wait()
 }
+
+func TestSearchFiltersAndReindex(t *testing.T) {
+	v, dir := fixture(t, nil, false)
+	ctx := context.Background()
+	put(t, dir, "inbox/a.md", "---\ntitle: 闪念\ntags: [想法/日常]\ntype: idea\nstatus: open\n---\n今天的闪念：独立开发 iOS崩溃率\n")
+	put(t, dir, "wiki/b.md", "---\ntags: [other]\nstatus: [open, done]\n---\n独立开发的另一篇\n")
+	put(t, dir, ".hidden/c.md", "独立开发 hidden")
+	res, err := v.Search(ctx, SearchOptions{Query: "独立开发"})
+	if err != nil || res.Total != 2 {
+		t.Fatalf("%+v %v", res, err)
+	}
+	for query, want := range map[string]string{"闪念": "inbox/a.md", "iOS崩溃率": "inbox/a.md"} {
+		res, err = v.Search(ctx, SearchOptions{Query: query})
+		if err != nil || len(res.Results) != 1 || res.Results[0].Path != want || res.Results[0].Snippet == "" {
+			t.Fatalf("%s: %+v %v", query, res, err)
+		}
+	}
+	for _, o := range []SearchOptions{
+		{Query: "独立开发", PathPrefix: "wiki/"},
+		{Query: "独立开发", Tag: "other"},
+		{Query: "独立开发", Frontmatter: map[string]any{"status": "done"}},
+	} {
+		res, err = v.Search(ctx, o)
+		if err != nil || len(res.Results) != 1 || res.Results[0].Path != "wiki/b.md" {
+			t.Fatalf("%+v: %+v %v", o, res, err)
+		}
+	}
+	res, err = v.Search(ctx, SearchOptions{Query: "独立开发", Tag: "#想法"})
+	if err != nil || len(res.Results) != 1 || res.Results[0].Path != "inbox/a.md" {
+		t.Fatalf("nested tag: %+v %v", res, err)
+	}
+	if err := v.WriteNote(ctx, "wiki/b.md", "全新内容 零点", "overwrite"); err != nil {
+		t.Fatal(err)
+	}
+	if res, _ = v.Search(ctx, SearchOptions{Query: "零点"}); len(res.Results) != 1 {
+		t.Fatalf("reindex: %+v", res)
+	}
+	if res, _ = v.Search(ctx, SearchOptions{Query: "独立开发"}); len(res.Results) != 1 {
+		t.Fatalf("stale: %+v", res)
+	}
+	if _, err = v.Search(ctx, SearchOptions{Query: " "}); err == nil {
+		t.Fatal("empty query accepted")
+	}
+	if _, err = v.Search(ctx, SearchOptions{Query: "x", Limit: 101}); err == nil {
+		t.Fatal("limit accepted")
+	}
+}

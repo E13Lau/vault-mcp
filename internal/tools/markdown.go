@@ -147,6 +147,11 @@ func registerMarkdown(s *mcp.Server, v *vault.Vault) {
 			out, err := v.AllTags(ctx)
 			return nil, TagsOutput{out}, err
 		})
+	add(s, "search_notes", "Keyword search ranked by BM25. All space-separated keywords must match; Chinese is matched by characters and adjacent pairs, so no spaces are needed. Title, path and tag hits and whole-keyword matches rank higher. Filter by path_prefix, tag, or frontmatter field.", true,
+		func(ctx context.Context, _ *mcp.CallToolRequest, in vault.SearchOptions) (*mcp.CallToolResult, vault.SearchOutput, error) {
+			out, err := v.Search(ctx, in)
+			return nil, out, err
+		})
 	if v.ReadOnly() {
 		return
 	}
