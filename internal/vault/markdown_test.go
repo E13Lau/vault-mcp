@@ -109,11 +109,12 @@ func TestFrontmatterTagsAndConcurrentEdits(t *testing.T) {
 		t.Fatalf("untouched format changed: %q", text)
 	}
 	tags, err := v.ManageTags(ctx, "note.md", "add", []string{"#开发/iOS", "新标签"})
-	if err != nil || !reflect.DeepEqual(tags, []string{"开发/iOS", "新标签", "旧标签"}) {
+	if err != nil || !reflect.DeepEqual(tags, []string{"旧标签", "开发/iOS", "新标签"}) {
 		t.Fatalf("tags: %v %v", tags, err)
 	}
-	if _, err := v.ManageTags(ctx, "note.md", "remove", []string{"旧标签"}); err != nil {
-		t.Fatal(err)
+	tags, err = v.ManageTags(ctx, "note.md", "remove", []string{"旧标签"})
+	if err != nil || !reflect.DeepEqual(tags, []string{"开发/iOS", "新标签"}) {
+		t.Fatalf("tags after remove: %v %v", tags, err)
 	}
 	all, err := v.AllTags(ctx)
 	if err != nil {

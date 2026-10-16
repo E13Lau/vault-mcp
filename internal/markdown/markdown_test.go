@@ -141,3 +141,31 @@ func TestLinkDestinationsDoNotCreateMetadata(t *testing.T) {
 		t.Fatalf("destinations became wikilinks: %+v", links)
 	}
 }
+
+func TestFrontmatterDatesKeepOriginalFormat(t *testing.T) {
+	text := "---\ncreated: 2026-09-25\nupdated: 2026-10-09\nname: x\n---\nbody\n"
+	doc, err := Parse(text)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if doc.Fields["created"] != "2026-09-25" {
+		t.Fatalf("created: %#v", doc.Fields["created"])
+	}
+	got, err := Update(text, map[string]any{"updated": "2026-10-16"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "---\ncreated: 2026-09-25\nupdated: 2026-10-16\nname: x\n---\nbody\n"; got != want {
+		t.Fatalf("got %q want %q", got, want)
+	}
+	// A non-date string replacing a date stays a string.
+	got, err = Update(text, map[string]any{"updated": "soon"}, nil)
+	if err != nil || !strings.Contains(got, "updated: soon\n") {
+		t.Fatalf("got %q %v", got, err)
+	}
+	// A quoted string value stays quoted.
+	got, err = Update("---\nupdated: \"2026-10-09\"\n---\n", map[string]any{"updated": "2026-10-16"}, nil)
+	if err != nil || !strings.Contains(got, "updated: \"2026-10-16\"\n") {
+		t.Fatalf("got %q %v", got, err)
+	}
+}

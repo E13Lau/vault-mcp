@@ -73,7 +73,7 @@ func Parse(text string) (Document, error) {
 		}
 		seen[key.Value] = true
 	}
-	if err := d.node.Decode(&d.Fields); err != nil {
+	if err := textTimestamps(d.node).Decode(&d.Fields); err != nil {
 		return d, fmt.Errorf("invalid YAML frontmatter: %w", err)
 	}
 	if _, err := json.Marshal(d.Fields); err != nil {
@@ -206,6 +206,23 @@ func Update(text string, fields map[string]any, remove []string) (string, error)
 	return result, nil
 }
 
+// textTimestamps copies a node tree with YAML timestamps as plain strings, so
+// dates such as 2026-09-25 are reported exactly as written.
+func textTimestamps(n *yaml.Node) *yaml.Node {
+	c := *n
+	if c.Kind == yaml.ScalarNode && c.Tag == "!!timestamp" {
+		c.Tag, c.Style = "!!str", yaml.DoubleQuotedStyle
+	}
+	if n.Alias != nil {
+		c.Alias = textTimestamps(n.Alias)
+	}
+	c.Content = make([]*yaml.Node, len(n.Content))
+	for i, child := range n.Content {
+		c.Content[i] = textTimestamps(child)
+	}
+	return &c
+}
+
 func encodeField(name string, value any, key, old *yaml.Node, newline string) (string, error) {
 	k := &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: name}
 	if key != nil {
@@ -215,6 +232,12 @@ func encodeField(name string, value any, key, old *yaml.Node, newline string) (s
 	var val yaml.Node
 	if err := val.Encode(value); err != nil {
 		return "", fmt.Errorf("cannot encode frontmatter field %q", name)
+	}
+	if text, ok := value.(string); ok && old != nil && old.Kind == yaml.ScalarNode && old.Tag == "!!timestamp" {
+		var probe yaml.Node
+		if yaml.Unmarshal([]byte(text), &probe) == nil && len(probe.Content) == 1 && probe.Content[0].Tag == "!!timestamp" {
+			val = yaml.Node{Kind: yaml.ScalarNode, Tag: "!!timestamp", Value: text}
+		}
 	}
 	if old != nil {
 		val.Anchor = old.Anchor

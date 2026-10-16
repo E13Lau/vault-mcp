@@ -309,19 +309,21 @@ func Tags(d Document) []string {
 			out = append(out, tag)
 		}
 	}
-	return UniqueTags(out)
+	out = UniqueTags(out)
+	sort.Strings(out)
+	return out
 }
 
+// UniqueTags drops duplicates and keeps first-seen order.
 func UniqueTags(tags []string) []string {
-	set := map[string]bool{}
+	seen := map[string]bool{}
+	out := make([]string, 0, len(tags))
 	for _, tag := range tags {
-		set[tag] = true
+		if !seen[tag] {
+			seen[tag] = true
+			out = append(out, tag)
+		}
 	}
-	out := make([]string, 0, len(set))
-	for tag := range set {
-		out = append(out, tag)
-	}
-	sort.Strings(out)
 	return out
 }
 

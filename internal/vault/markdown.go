@@ -329,31 +329,34 @@ func (v *Vault) ManageTags(ctx context.Context, name, action string, tags []stri
 		if err != nil {
 			return err
 		}
-		set := map[string]bool{}
-		for _, t := range markdown.FrontmatterTags(doc.Fields) {
-			set[t] = true
-		}
-		if action == "set" {
-			set = map[string]bool{}
-		}
 		if action != "add" && action != "remove" && action != "set" {
 			return errors.New("action must be add, remove, or set")
 		}
+		current := markdown.FrontmatterTags(doc.Fields)
+		if action == "set" {
+			current = nil
+		}
+		normalized := make([]string, 0, len(tags))
 		for _, t := range tags {
 			tag, err := markdown.NormalizeTag(t)
 			if err != nil {
 				return err
 			}
-			if action == "remove" {
-				delete(set, tag)
-			} else {
-				set[tag] = true
+			normalized = append(normalized, tag)
+		}
+		if action == "remove" {
+			drop := map[string]bool{}
+			for _, t := range normalized {
+				drop[t] = true
 			}
+			for _, t := range current {
+				if !drop[t] {
+					out = append(out, t)
+				}
+			}
+		} else {
+			out = markdown.UniqueTags(append(current, normalized...))
 		}
-		for tag := range set {
-			out = append(out, tag)
-		}
-		out = markdown.UniqueTags(out)
 		updated, err := markdown.Update(text, map[string]any{"tags": out}, nil)
 		if err != nil {
 			return err
