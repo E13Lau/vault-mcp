@@ -78,6 +78,12 @@ func Run(ctx context.Context, c config.Config) error {
 		return err
 	}
 	defer v.Close()
+	if err := v.SetIndexFile(c.IndexFile); err != nil {
+		return err
+	}
+	if err := v.Refresh(ctx); err != nil {
+		return err
+	}
 	s, err := New(v)
 	if err != nil {
 		return err

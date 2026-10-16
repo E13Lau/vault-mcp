@@ -7,12 +7,12 @@ import (
 )
 
 func TestParse(t *testing.T) {
-	env := map[string]string{"VAULT_MCP_VAULT": "/env", "VAULT_MCP_TOKEN": "secret", "VAULT_MCP_READ_ONLY": "true", "VAULT_MCP_EXCLUDE": "raw/assets/**, private/**"}
+	env := map[string]string{"VAULT_MCP_VAULT": "/env", "VAULT_MCP_TOKEN": "secret", "VAULT_MCP_READ_ONLY": "true", "VAULT_MCP_EXCLUDE": "raw/assets/**, private/**", "VAULT_MCP_INDEX_FILE": "custom/index.md"}
 	c, err := Parse([]string{"--vault", "/flag", "--read-only=false", "--transport=http", "--listen=0.0.0.0:8080"}, func(k string) string { return env[k] }, io.Discard)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if c.Vault != "/flag" || c.ReadOnly || c.Token != "secret" || !reflect.DeepEqual(c.Exclude, []string{"raw/assets/**", "private/**"}) {
+	if c.Vault != "/flag" || c.ReadOnly || c.Token != "secret" || c.IndexFile != "custom/index.md" || !reflect.DeepEqual(c.Exclude, []string{"raw/assets/**", "private/**"}) {
 		t.Fatalf("unexpected config: %+v", c)
 	}
 }

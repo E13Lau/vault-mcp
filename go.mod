@@ -6,6 +6,8 @@ require (
 	github.com/bmatcuk/doublestar/v4 v4.10.3
 	github.com/google/jsonschema-go v0.4.3
 	github.com/modelcontextprotocol/go-sdk v1.8.0
+	github.com/yuin/goldmark v1.8.6
+	go.yaml.in/yaml/v3 v3.0.5
 )
 
 require (

@@ -101,6 +101,7 @@ func Register(s *mcp.Server, v *vault.Vault) {
 			g, err := v.Guide()
 			return nil, g, err
 		})
+	registerMarkdown(s, v)
 	if v.ReadOnly() {
 		return
 	}
