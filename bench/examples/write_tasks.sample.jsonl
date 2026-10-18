@@ -1,0 +1,2 @@
+{"id":"W01","task":"Append a thought to the daily note following the vault rules. (fictional)","expected_changes":["raw/2026-01-01-thoughts.md"],"checks":["lint","git-diff-scope","rules"],"notes":"Fictional sample — replace with real tasks outside this repository."}
+{"id":"W02","task":"Create a new concept page and register it in the index. (fictional)","expected_changes":["wiki/concepts/new-topic.md","index.md"],"checks":["lint","git-diff-scope","rules"],"notes":"Fictional sample."}
