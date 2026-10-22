@@ -65,7 +65,7 @@ its descendants. The rules file is subject to the same exclusions.
 | `get_vault_stats` | Accessible note, directory, attachment, byte, tag and wikilink counts |
 | `resolve_wikilink` | Resolve shortest note paths; return all ambiguous candidates |
 | `list_all_tags` | Frontmatter and inline tags, with note counts and paths |
-| `search_notes` | BM25 keyword search with Chinese support and path, tag and frontmatter filters |
+| `search_notes` | BM25 search (any-word match, question-friendly) with Chinese support and path, tag and frontmatter filters |
 | `write_note` | `overwrite` (default), `append`, or `prepend`; create missing parents |
 | `patch_note` | Replace a nonempty fragment that occurs exactly once |
 | `delete_note` | Permanently delete one note |
@@ -131,18 +131,33 @@ frontmatter field; use `list_all_tags` to see inline tags as well.
 
 ## Search
 
-`search_notes` takes space-separated keywords. A note must match every keyword
-(AND) and results are ranked by BM25 (k1 = 1.2, b = 0.75). Title, path and tag
-hits count extra, and a keyword that appears as a whole substring adds a bonus,
-more so in the title. Text is lowercased. Latin and digit runs are words. Chinese,
-Japanese and Korean text is indexed as single characters and adjacent pairs
-(bigrams), so no word segmentation is needed: `独立开发` matches the pairs
-`独立`, `立开`, `开发`, and `iOS崩溃率` requires `ios`, `崩溃`, and `溃率`.
-A single-character keyword matches that character.
+`search_notes` accepts keywords or a whole question. By default (`match: "any"`)
+a note matches when it contains at least one query word, and results are ranked
+by BM25 (k1 = 1.2, b = 0.75). A note with more of the query words ranks higher
+(score × 1 + coverage, coverage = share of the query's IDF mass the note
+contains). Common question words (哪些, 什么, 怎么, 如何, 是否, 有没有, 库里, 笔记,
+页面, 相关, 记录, 吗, 呢, 的, 了 and a few English ones) are dropped from the
+query. If nothing is left, the result is empty.
+
+Ranking weights, all constants in `internal/search/search.go`: a title or
+frontmatter `aliases` hit counts as 3 body hits, a tag or path hit as 2. A
+keyword that appears whole adds +3 in the title and +1 in the body. The score
+is also multiplied by `1 + 1.0 × ln(1 + backlinks)`, so well-linked concept and
+entity pages beat the raw notes they summarize. Text in `"double quotes"` is a
+phrase: it must occur in the title or body of every result.
+
+`match: "all"` restores the v0.1 rule: every space-separated keyword must match
+and stopwords are kept.
+
+Text is lowercased. Latin and digit runs are words. Chinese, Japanese and Korean
+text is indexed as single characters and adjacent pairs (bigrams), so no word
+segmentation or dictionary is needed: `独立开发` matches the pairs `独立`, `立开`,
+`开发`. A single-character query matches that character.
 
 | Argument | Meaning |
 | --- | --- |
-| `query` | Required keywords |
+| `query` | Keywords or a question; `"..."` marks a required phrase |
+| `match` | `any` (default) or `all` |
 | `path_prefix` | Only paths that start with this prefix, such as `wiki/` |
 | `tag` | A tag; nested children (`dev` matches `dev/ios`) also match |
 | `frontmatter` | Field/value pairs; a list field matches if it contains the value |
