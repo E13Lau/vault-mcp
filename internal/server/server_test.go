@@ -4,19 +4,23 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/E13Lau/vault-mcp/internal/deepsearch"
 	"github.com/E13Lau/vault-mcp/internal/vault"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -300,4 +304,90 @@ func TestBrainGuide(t *testing.T) {
 		t.Fatal("Brain guide resource mismatch")
 	}
 	t.Logf("Brain guide verified: %d bytes; content not logged", len(full))
+}
+
+type stubScorer struct{}
+
+func (stubScorer) Model() string { return "stub-judge" }
+
+func (stubScorer) Score(context.Context, string, []deepsearch.Passage) ([]deepsearch.Score, deepsearch.Usage, error) {
+	return nil, deepsearch.Usage{Model: "stub-judge"}, errors.New("judge offline")
+}
+
+func TestDeepSearchRegistration(t *testing.T) {
+	v, _ := openVault(t, false)
+	if v.DeepSearchEnabled() {
+		t.Fatal("deep search must be off without a key")
+	}
+	v.EnableDeepSearch(stubScorer{})
+	h := httptest.NewServer(Handler(v, "tok"))
+	t.Cleanup(h.Close)
+	ctx := testContext(t)
+	s := connect(t, ctx, &mcp.StreamableClientTransport{Endpoint: h.URL + "/mcp", HTTPClient: &http.Client{Transport: bearerTransport{"tok"}}, DisableStandaloneSSE: true})
+	r, err := s.ListTools(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	names := []string{}
+	for _, tool := range r.Tools {
+		names = append(names, tool.Name)
+	}
+	sort.Strings(names)
+	if !slices.Contains(names, "deep_search") {
+		t.Fatalf("tools = %v", names)
+	}
+	if got := s.InitializeResult().Instructions; !strings.Contains(got, "deep_search") {
+		t.Fatalf("instructions do not mention deep_search: %q", got)
+	}
+}
+
+func TestDeepSearchToolEndToEnd(t *testing.T) {
+	v, dir := openVault(t, false)
+	if err := os.WriteFile(filepath.Join(dir, "answer.md"), []byte("# 答案\n\nConnect 崩溃率是 0.6%。"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	judge := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer judge-key" {
+			t.Errorf("judge auth = %q", r.Header.Get("Authorization"))
+		}
+		var req struct {
+			Model    string `json:"model"`
+			Messages []struct {
+				Content string `json:"content"`
+			} `json:"messages"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Errorf("judge request: %v", err)
+		}
+		if req.Model != "stub/judge" || len(req.Messages) != 2 || !strings.Contains(req.Messages[1].Content, "0.6%") {
+			t.Errorf("judge request model=%q messages=%d", req.Model, len(req.Messages))
+		}
+		io.WriteString(w, `{"model":"stub/judge","choices":[{"message":{"content":"{\"scores\":[{\"id\":1,\"score\":0.99}]}"}}],"usage":{"prompt_tokens":500,"completion_tokens":12,"cost":0.00005}}`)
+	}))
+	t.Cleanup(judge.Close)
+	v.EnableDeepSearch(deepsearch.NewOpenRouter(judge.URL, "stub/judge", "judge-key"))
+	h := httptest.NewServer(Handler(v, "tok"))
+	t.Cleanup(h.Close)
+	ctx := testContext(t)
+	s := connect(t, ctx, &mcp.StreamableClientTransport{Endpoint: h.URL + "/mcp", HTTPClient: &http.Client{Transport: bearerTransport{"tok"}}, DisableStandaloneSSE: true})
+	var out struct {
+		Degraded bool `json:"degraded"`
+		Usage    struct {
+			Requests int     `json:"requests"`
+			CostUSD  float64 `json:"cost_usd"`
+		} `json:"usage"`
+		Results []struct {
+			Path  string  `json:"path"`
+			Score float64 `json:"score"`
+		} `json:"results"`
+	}
+	if err := json.Unmarshal(call(t, ctx, s, "deep_search", map[string]any{"query": "崩溃率", "limit": 5}), &out); err != nil {
+		t.Fatal(err)
+	}
+	if out.Degraded || len(out.Results) != 1 || out.Results[0].Path != "answer.md" || out.Results[0].Score != 0.99 {
+		t.Fatalf("deep_search output = %+v", out)
+	}
+	if out.Usage.Requests != 1 || out.Usage.CostUSD != 0.00005 {
+		t.Fatalf("usage = %+v", out.Usage)
+	}
 }

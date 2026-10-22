@@ -102,6 +102,13 @@ func Register(s *mcp.Server, v *vault.Vault) {
 			return nil, g, err
 		})
 	registerMarkdown(s, v)
+	if v.DeepSearchEnabled() {
+		mcp.AddTool(s, definition("deep_search", "Slow, paid second pass: rank BM25 candidates with a model judge and return the most relevant pages. Use only when search_notes finds nothing useful or the question uses different words.", true),
+			func(ctx context.Context, _ *mcp.CallToolRequest, in vault.DeepSearchOptions) (*mcp.CallToolResult, vault.DeepSearchOutput, error) {
+				out, err := v.DeepSearch(ctx, in)
+				return nil, out, err
+			})
+	}
 	if v.ReadOnly() {
 		return
 	}

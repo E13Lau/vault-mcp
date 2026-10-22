@@ -42,7 +42,7 @@ func main() {
 	var f flags
 	flag.StringVar(&f.questionsFile, "questions", "", "questions.jsonl file")
 	flag.StringVar(&f.outDir, "out", "", "output directory (results JSON + CSV)")
-	flag.StringVar(&f.target, "target", "vault", "system under test: vault or sage")
+	flag.StringVar(&f.target, "target", "vault", "system under test: vault, vault-deep, or sage")
 	flag.StringVar(&f.mcpURL, "mcp-url", "", "Streamable HTTP endpoint URL (e.g. http://127.0.0.1:8080/mcp)")
 	flag.StringVar(&f.stdioCmd, "stdio-cmd", "", "server command for the stdio transport, e.g. /path/server --arg1")
 	flag.IntVar(&f.limit, "limit", 10, "number of search results requested per query")
@@ -63,17 +63,18 @@ func main() {
 }
 
 type perQuestion struct {
-	ID           string         `json:"id"`
-	Type         string         `json:"type"`
-	Question     string         `json:"question"`
-	SearchText   string         `json:"search_text"`
-	GoldPages    []string       `json:"gold_pages"`
-	RelatedPages []string       `json:"related_pages,omitempty"`
-	Results      []adapt.Hit    `json:"results"`
-	HitRanks     map[string]int `json:"hit_ranks"`     // gold page -> rank, 0 = not in top-k
-	RelatedRanks map[string]int `json:"related_ranks"` // related page -> rank, 0 = not in top-k
-	FirstHit     int            `json:"first_hit_rank"`
-	DurationMs   float64        `json:"duration_ms"`
+	ID           string          `json:"id"`
+	Type         string          `json:"type"`
+	Question     string          `json:"question"`
+	SearchText   string          `json:"search_text"`
+	GoldPages    []string        `json:"gold_pages"`
+	RelatedPages []string        `json:"related_pages,omitempty"`
+	Results      []adapt.Hit     `json:"results"`
+	HitRanks     map[string]int  `json:"hit_ranks"`     // gold page -> rank, 0 = not in top-k
+	RelatedRanks map[string]int  `json:"related_ranks"` // related page -> rank, 0 = not in top-k
+	FirstHit     int             `json:"first_hit_rank"`
+	DurationMs   float64         `json:"duration_ms"`
+	JudgeUsage   json.RawMessage `json:"judge_usage,omitempty"` // deep_search: requests, tokens, cost
 }
 
 type retrievalResult struct {
@@ -135,6 +136,7 @@ func run(f flags) error {
 		if err != nil {
 			return fmt.Errorf("question %s: %w", q.ID, err)
 		}
+		judgeUsage := adapt.ExtractField(cr, "usage")
 		hits = adapt.TopHits(hits, f.limit)
 		// Scoring rule (same for both targets): drop the vault-wide
 		// index.md from the result list before computing Recall/MRR,
@@ -154,6 +156,7 @@ func run(f flags) error {
 			RelatedRanks: map[string]int{},
 			FirstHit:     rankOfHit(hits, q.GoldPages, prefix),
 			DurationMs:   float64(time.Since(start).Microseconds()) / 1000,
+			JudgeUsage:   judgeUsage,
 		}
 		for _, g := range q.GoldPages {
 			pq.HitRanks[g] = rankOfHitOne(hits, g, prefix)

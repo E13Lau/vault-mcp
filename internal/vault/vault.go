@@ -14,6 +14,7 @@ import (
 	"sync"
 	"unicode/utf8"
 
+	"github.com/E13Lau/vault-mcp/internal/deepsearch"
 	"github.com/E13Lau/vault-mcp/internal/index"
 	"github.com/E13Lau/vault-mcp/internal/search"
 	"github.com/bmatcuk/doublestar/v4"
@@ -35,6 +36,8 @@ type Vault struct {
 	indexFile string
 	searchMu  sync.Mutex
 	searchDoc map[*index.Entry]*search.Doc
+	deepMu    sync.Mutex
+	scorer    deepsearch.Scorer
 }
 
 func Open(dir string, exclude []string, readOnly bool) (*Vault, error) {

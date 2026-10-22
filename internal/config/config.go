@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"net/url"
 	"strconv"
 	"strings"
 
@@ -17,6 +18,9 @@ type Config struct {
 	Vault, Transport, Listen, Token, IndexFile string
 	ReadOnly                                   bool
 	Exclude                                    []string
+	// DeepSearch is optional. The key comes only from the environment, so it
+	// cannot appear in a process listing, shell history, or a log line.
+	DeepSearchEndpoint, DeepSearchModel, DeepSearchKey string
 }
 
 func Parse(args []string, getenv func(string) string, output io.Writer) (Config, error) {
@@ -39,6 +43,9 @@ func Parse(args []string, getenv func(string) string, output io.Writer) (Config,
 	f.StringVar(&c.Token, "token", value("TOKEN", ""), "HTTP Bearer token (prefer VAULT_MCP_TOKEN)")
 	f.StringVar(&c.IndexFile, "index-file", value("INDEX_FILE", "index.md"), "vault-relative Markdown index used for L0 summaries")
 	f.BoolVar(&c.ReadOnly, "read-only", ro, "do not register or execute write tools")
+	f.StringVar(&c.DeepSearchEndpoint, "deep-search-endpoint", value("DEEP_SEARCH_ENDPOINT", ""), "OpenAI-compatible chat completions URL for deep_search; empty uses OpenRouter")
+	f.StringVar(&c.DeepSearchModel, "deep-search-model", value("DEEP_SEARCH_MODEL", "deepseek/deepseek-v4-flash"), "judge model for deep_search")
+	c.DeepSearchKey = getenv("VAULT_MCP_DEEP_SEARCH_API_KEY")
 	var excludes string
 	f.StringVar(&excludes, "exclude", value("EXCLUDE", ""), "comma-separated vault-relative doublestar globs")
 	if err := f.Parse(args); err != nil {
@@ -81,6 +88,20 @@ func (c Config) Validate() error {
 		}
 		if strings.ContainsAny(c.Token, "\r\n\t ") {
 			return errors.New("token must not contain whitespace")
+		}
+	}
+	if c.DeepSearchKey != "" {
+		if c.DeepSearchEndpoint != "" {
+			u, err := url.Parse(c.DeepSearchEndpoint)
+			if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+				return errors.New("deep-search-endpoint must be an absolute http or https URL")
+			}
+		}
+		if strings.ContainsAny(c.DeepSearchKey, "\r\n\t ") {
+			return errors.New("VAULT_MCP_DEEP_SEARCH_API_KEY must not contain whitespace")
+		}
+		if strings.TrimSpace(c.DeepSearchModel) == "" {
+			return errors.New("deep-search-model must not be empty")
 		}
 	}
 	return nil

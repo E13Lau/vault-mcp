@@ -44,6 +44,9 @@ Flags override environment variables. Use `--help` for flag descriptions.
 | `--read-only` | `VAULT_MCP_READ_ONLY` | `false` |
 | `--exclude` | `VAULT_MCP_EXCLUDE` | Empty; comma-separated doublestar globs |
 | `--index-file` | `VAULT_MCP_INDEX_FILE` | `index.md`; vault-relative summary index |
+| `--deep-search-endpoint` | `VAULT_MCP_DEEP_SEARCH_ENDPOINT` | Empty; OpenRouter chat completions |
+| `--deep-search-model` | `VAULT_MCP_DEEP_SEARCH_MODEL` | `deepseek/deepseek-v4-flash` |
+| — | `VAULT_MCP_DEEP_SEARCH_API_KEY` | Empty; a key turns `deep_search` on. The key has no flag |
 
 Example: `--exclude 'raw/assets/**,private/**'`. Patterns and all tool paths
 are relative to the vault and use `/`. Excluding a directory also excludes
@@ -66,6 +69,7 @@ its descendants. The rules file is subject to the same exclusions.
 | `resolve_wikilink` | Resolve shortest note paths; return all ambiguous candidates |
 | `list_all_tags` | Frontmatter and inline tags, with note counts and paths |
 | `search_notes` | BM25 search (any-word match, question-friendly) with Chinese support and path, tag and frontmatter filters |
+| `deep_search` | Optional: re-rank BM25 candidates with a model judge. Registered only when a judge key is set |
 | `write_note` | `overwrite` (default), `append`, or `prepend`; create missing parents |
 | `patch_note` | Replace a nonempty fragment that occurs exactly once |
 | `delete_note` | Permanently delete one note |
@@ -168,6 +172,35 @@ first match. `total` counts all matches before `limit`. Nothing is indexed at
 startup: the first query tokenizes the notes (about 2.4 s for 1,765 notes), and
 later queries reuse the cached terms and only retokenize notes changed on disk.
 Typical queries on that vault take 0.2–0.4 s. Excluded and hidden files are never searched.
+
+## Deep search
+
+`deep_search` is an optional second pass. It takes the same `query` as
+`search_notes`, keeps the top 60 BM25 pages, cuts each page into chunks of at
+most 8,000 characters at headings and blank lines, keeps the best chunk per
+page, and sends those chunks to a model that scores each one from 0 to 1 for
+whether it supplies a necessary fact in an answer chain (the criterion comes
+from SAG2, MIT). Pages are ranked by their best chunk. `limit` is 1–20
+(default 10) and applies to pages. `expansions` (0–2, default 0) adds frequent
+terms from the best passages, runs BM25 again and scores the new pages.
+
+The tool exists only when `VAULT_MCP_DEEP_SEARCH_API_KEY` is set. The key is
+read from the environment only: there is no flag for it, and it is never
+logged. The default endpoint is OpenRouter's chat completions API, so the
+default judge is an OpenRouter model; `--deep-search-model` and
+`--deep-search-endpoint` switch to another OpenAI-compatible provider.
+
+One call costs one to two model requests, roughly 30k input tokens each, and
+has a 15 s limit. The reply includes `usage` (`requests`, `input_tokens`,
+`output_tokens`, `cost_usd`, `model`) when the provider reports it. When the
+model fails, times out, or reports a bad answer, the tool returns the BM25
+pages with `degraded: true` and a `note`; those scores are BM25 scores and carry
+no model judgment. Nothing is written to the vault, and there is no vector
+index.
+
+The instructions sent to clients tell agents to call `search_notes` first and
+to use `deep_search` only when keywords miss or the question uses different
+words.
 
 ## Vault rules
 

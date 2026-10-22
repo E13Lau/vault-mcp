@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/E13Lau/vault-mcp/internal/config"
+	"github.com/E13Lau/vault-mcp/internal/deepsearch"
 	"github.com/E13Lau/vault-mcp/internal/tools"
 	"github.com/E13Lau/vault-mcp/internal/vault"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -21,12 +22,20 @@ import (
 
 const Version = "0.1.0-dev"
 
+// DeepSearchInstructions explains the optional second-pass tool to clients.
+// It ships only when a judge is configured.
+const DeepSearchInstructions = `Search order: call search_notes first. Use deep_search only when search_notes returns nothing useful, or when the question and the notes use different words. deep_search sends up to 60 passages to a paid model on every call, so it is slower and costs money. Its results are ranked by that model. When the model fails or times out, the reply is marked degraded and holds BM25 results only, without a model score.`
+
 func New(v *vault.Vault) (*mcp.Server, error) {
 	g, err := v.Guide()
 	if err != nil {
 		return nil, err
 	}
-	s := mcp.NewServer(&mcp.Implementation{Name: "vault-mcp", Version: Version}, &mcp.ServerOptions{Instructions: g.Instructions()})
+	instructions := g.Instructions()
+	if v.DeepSearchEnabled() {
+		instructions += "\n\n" + DeepSearchInstructions
+	}
+	s := mcp.NewServer(&mcp.Implementation{Name: "vault-mcp", Version: Version}, &mcp.ServerOptions{Instructions: instructions})
 	tools.Register(s, v)
 	s.AddResource(&mcp.Resource{URI: "vault://guide", Name: "Vault guide", Description: "Full, current vault rules", MIMEType: "text/markdown"},
 		func(context.Context, *mcp.ReadResourceRequest) (*mcp.ReadResourceResult, error) {
@@ -78,6 +87,9 @@ func Run(ctx context.Context, c config.Config) error {
 		return err
 	}
 	defer v.Close()
+	if c.DeepSearchKey != "" {
+		v.EnableDeepSearch(deepsearch.NewOpenRouter(c.DeepSearchEndpoint, c.DeepSearchModel, c.DeepSearchKey))
+	}
 	if err := v.SetIndexFile(c.IndexFile); err != nil {
 		return err
 	}

@@ -17,8 +17,9 @@ import (
 type Target string
 
 const (
-	Vault Target = "vault" // vault-mcp
-	Sage  Target = "sage"  // sage-wiki
+	Vault     Target = "vault"      // vault-mcp search_notes
+	VaultDeep Target = "vault-deep" // vault-mcp deep_search (model judge)
+	Sage      Target = "sage"       // sage-wiki
 )
 
 // SearchSpec describes one search-tool invocation.
@@ -33,6 +34,8 @@ func (t Target) SearchSpec() SearchSpec {
 	switch t {
 	case Sage:
 		return SearchSpec{Tool: "wiki_search", Args: map[string]any{}}
+	case VaultDeep:
+		return SearchSpec{Tool: "deep_search", Args: map[string]any{"expansions": 0}}
 	default:
 		return SearchSpec{Tool: "search_notes", Args: map[string]any{}}
 	}
@@ -347,4 +350,28 @@ func TopHits(hits []Hit, k int) []Hit {
 		sorted = sorted[:k]
 	}
 	return sorted
+}
+
+// ExtractField returns one top-level field of the JSON a tool returned, or nil.
+// deep_search reports its model usage under "usage" so the retrieval bench can
+// record judge requests and cost per question.
+func ExtractField(cr *mcpclient.CallResult, field string) json.RawMessage {
+	for _, c := range cr.Content {
+		if c.Type != "text" {
+			continue
+		}
+		parsed, err := parseAny(c.Text)
+		if err != nil {
+			continue
+		}
+		if obj, ok := parsed.(map[string]any); ok {
+			if v, ok := obj[field]; ok {
+				raw, err := json.Marshal(v)
+				if err == nil {
+					return raw
+				}
+			}
+		}
+	}
+	return nil
 }

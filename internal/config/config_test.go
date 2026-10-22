@@ -47,3 +47,25 @@ func TestValidation(t *testing.T) {
 		t.Fatal("accepted invalid environment boolean")
 	}
 }
+
+func TestDeepSearchConfig(t *testing.T) {
+	env := map[string]string{"VAULT_MCP_VAULT": "/v", "VAULT_MCP_DEEP_SEARCH_API_KEY": "test-key", "VAULT_MCP_DEEP_SEARCH_MODEL": "vendor/judge"}
+	c, err := Parse(nil, func(k string) string { return env[k] }, io.Discard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.DeepSearchKey != "test-key" || c.DeepSearchModel != "vendor/judge" || c.DeepSearchEndpoint != "" {
+		t.Fatalf("config = %+v", c)
+	}
+	// The key must never be a flag: a caller cannot pass it on the command line.
+	if _, err := Parse([]string{"--vault=/v", "--deep-search-key=leak"}, func(string) string { return "" }, io.Discard); err == nil {
+		t.Fatal("accepted a key flag")
+	}
+	if _, err := Parse([]string{"--vault=/v", "--deep-search-endpoint=ftp://example.com"}, func(k string) string { return env[k] }, io.Discard); err == nil {
+		t.Fatal("accepted a non-HTTP judge endpoint")
+	}
+	// Without a key the optional tool stays off and the endpoint is not validated.
+	if c, err := Parse([]string{"--vault=/v"}, func(string) string { return "" }, io.Discard); err != nil || c.DeepSearchKey != "" {
+		t.Fatalf("no-key config = %+v, %v", c, err)
+	}
+}
