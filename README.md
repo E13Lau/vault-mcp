@@ -6,7 +6,8 @@ the [official MCP Go SDK](https://github.com/modelcontextprotocol/go-sdk).
 It never runs git commands. Version control belongs to an external process.
 
 It provides 20 tools for files, Markdown metadata, layered summaries, links,
-tags, and keyword search. There is no RAG or vector index.
+tags, and BM25 search over keywords or whole questions. There is no RAG or
+vector index.
 
 ## Install
 
@@ -65,7 +66,7 @@ its descendants. The rules file is subject to the same exclusions.
 | `get_vault_stats` | Accessible note, directory, attachment, byte, tag and wikilink counts |
 | `resolve_wikilink` | Resolve shortest note paths; return all ambiguous candidates |
 | `list_all_tags` | Frontmatter and inline tags, with note counts and paths |
-| `search_notes` | BM25 keyword search with Chinese support and path, tag and frontmatter filters |
+| `search_notes` | BM25 search over keywords or a whole question, with Chinese word segmentation and path, tag and frontmatter filters |
 | `write_note` | `overwrite` (default), `append`, or `prepend`; create missing parents |
 | `patch_note` | Replace a nonempty fragment that occurs exactly once |
 | `delete_note` | Permanently delete one note |
@@ -131,28 +132,48 @@ frontmatter field; use `list_all_tags` to see inline tags as well.
 
 ## Search
 
-`search_notes` takes space-separated keywords. A note must match every keyword
-(AND) and results are ranked by BM25 (k1 = 1.2, b = 0.75). Title, path and tag
-hits count extra, and a keyword that appears as a whole substring adds a bonus,
-more so in the title. Text is lowercased. Latin and digit runs are words. Chinese,
-Japanese and Korean text is indexed as single characters and adjacent pairs
-(bigrams), so no word segmentation is needed: `独立开发` matches the pairs
-`独立`, `立开`, `开发`, and `iOS崩溃率` requires `ios`, `崩溃`, and `溃率`.
-A single-character keyword matches that character.
+`search_notes` accepts keywords or a natural-language question. Terms are
+combined with OR: a note that matches any term is returned, and notes that match
+more (or rarer) terms rank higher. A whole question therefore never returns zero
+results just because one word is absent. Ranking is BM25 (k1 = 1.2, b = 0.3)
+with the document length capped at 800 index terms, so a long entity page is not
+buried under short notes that repeat a word twice.
+
+Text is lowercased. Latin and digit runs are words; digits keep decimal points
+and separators, so `4.4` stays one term. Chinese, Japanese and Korean text is
+split into dictionary words with an embedded jieba-compatible dictionary
+(100,000 entries, no model, no CGO). Each CJK run also contributes every
+character and every adjacent pair, so `独立开发` matches the word `独立` and the
+pairs `独立`, `立开`, `开发`. The n-grams keep recall when the dictionary splits a
+question and a note differently, and a single-character query still matches.
+
+Chinese question words and function words (`什么`, `怎么`, `是否`, `的`, `哪些`,
+`相关`, `笔记`) and common English stopwords (`the`, `what`, `how`) are removed
+from the query. Documents are never filtered. Title hits count triple, path and
+tag hits double, and a query word that appears as a whole substring adds a
+bonus, more so in the title. A note that matches more distinct terms gets a
+coverage boost of up to 25%.
 
 | Argument | Meaning |
 | --- | --- |
-| `query` | Required keywords |
+| `query` | Keywords or a question; OR-combined |
 | `path_prefix` | Only paths that start with this prefix, such as `wiki/` |
 | `tag` | A tag; nested children (`dev` matches `dev/ios`) also match |
 | `frontmatter` | Field/value pairs; a list field matches if it contains the value |
 | `limit` | 1–100, default 20 |
 
 Each result has `path`, `title`, `score`, `type`, `tags` and a `snippet` around the
-first match. `total` counts all matches before `limit`. Nothing is indexed at
-startup: the first query tokenizes the notes (about 2.4 s for 1,765 notes), and
-later queries reuse the cached terms and only retokenize notes changed on disk.
-Typical queries on that vault take 0.2–0.4 s. Excluded and hidden files are never searched.
+first (longest) match. `total` counts all matches before `limit`.
+
+The dictionary loads on the first search, not at startup: about 0.15 s and
+about 32 MB of heap. The first query also tokenizes every note (about 1 s for a
+981-note vault, dictionary included), and later queries reuse the cached terms
+and only retokenize notes changed on disk (p50 about 0.1 s on that vault).
+Excluded and hidden files are never searched.
+
+`vault.SearchCandidates(ctx, options, n)` exposes the same ranking as a
+two-stage API: up to 500 candidates with path, score and a wider excerpt around
+the match. `deep_search` uses it as its first stage.
 
 ## Vault rules
 

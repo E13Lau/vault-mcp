@@ -307,3 +307,43 @@ func TestSearchFiltersAndReindex(t *testing.T) {
 		t.Fatal("limit accepted")
 	}
 }
+
+func TestSearchORAndCandidates(t *testing.T) {
+	v, dir := fixture(t, nil, false)
+	ctx := context.Background()
+	put(t, dir, "wiki/a.md", "崩溃率统计 4.4%\n")
+	put(t, dir, "wiki/b.md", "另一个主题 归档\n")
+	put(t, dir, "inbox/c.md", "崩溃率 4.4% 归档\n")
+	res, err := v.Search(ctx, SearchOptions{Query: "崩溃率 归档"})
+	if err != nil || res.Total != 3 {
+		t.Fatalf("OR must return notes matching either term: %+v %v", res, err)
+	}
+	if res.Results[0].Path != "inbox/c.md" {
+		t.Fatalf("note matching both terms must rank first: %+v", res.Results)
+	}
+	res, err = v.Search(ctx, SearchOptions{Query: "崩溃率 归档", PathPrefix: "wiki/"})
+	if err != nil || res.Total != 2 {
+		t.Fatalf("path_prefix filter: %+v %v", res, err)
+	}
+	res, err = v.Search(ctx, SearchOptions{Query: "崩溃率 归档", Tag: "missing"})
+	if err != nil || res.Total != 0 {
+		t.Fatalf("tag filter: %+v %v", res, err)
+	}
+	candidates, err := v.SearchCandidates(ctx, SearchOptions{Query: "崩溃率 归档", PathPrefix: "wiki/"}, 1)
+	if err != nil || len(candidates) != 1 {
+		t.Fatalf("candidates: %+v %v", candidates, err)
+	}
+	if c := candidates[0]; c.Path != "wiki/a.md" || c.Score <= 0 || c.Excerpt == "" {
+		t.Fatalf("candidate fields: %+v", c)
+	}
+	candidates, err = v.SearchCandidates(ctx, SearchOptions{Query: "崩溃率"}, 10)
+	if err != nil || len(candidates) != 2 {
+		t.Fatalf("candidates ignore limit but honour n: %+v %v", candidates, err)
+	}
+	if _, err := v.SearchCandidates(ctx, SearchOptions{Query: "崩溃率"}, 0); err == nil {
+		t.Fatal("zero candidates accepted")
+	}
+	if _, err := v.Search(ctx, SearchOptions{Query: "什么 怎么 是否"}); err == nil {
+		t.Fatal("stopword-only query accepted")
+	}
+}
