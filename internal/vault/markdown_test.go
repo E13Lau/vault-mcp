@@ -307,3 +307,27 @@ func TestSearchFiltersAndReindex(t *testing.T) {
 		t.Fatal("limit accepted")
 	}
 }
+
+func TestSearchWholeQuestionAnyAll(t *testing.T) {
+	v, dir := fixture(t, nil, false)
+	ctx := context.Background()
+	put(t, dir, "wiki/lighthouse.md", "---\ntitle: 灯塔项目\naliases: [海边信号站]\n---\n灯塔的维护周期是每季度一次。\n")
+	put(t, dir, "wiki/other.md", "---\ntitle: 其它\n---\n与维护无关的杂记，提到了周期。\n")
+	q := "库里有哪些笔记记录了灯塔的维护周期吗？"
+	res, err := v.Search(ctx, SearchOptions{Query: q})
+	if err != nil || len(res.Results) != 2 || res.Results[0].Path != "wiki/lighthouse.md" {
+		t.Fatalf("any: %+v %v", res, err)
+	}
+	if res, err = v.Search(ctx, SearchOptions{Query: q, Match: "all"}); err != nil || res.Total != 0 {
+		t.Fatalf("all: %+v %v", res, err)
+	}
+	if res, err = v.Search(ctx, SearchOptions{Query: "海边信号站"}); err != nil || len(res.Results) != 1 || res.Results[0].Path != "wiki/lighthouse.md" {
+		t.Fatalf("alias: %+v %v", res, err)
+	}
+	if res, err = v.Search(ctx, SearchOptions{Query: "哪些笔记吗"}); err != nil || res.Total != 0 || res.Results == nil {
+		t.Fatalf("stopwords only: %+v %v", res, err)
+	}
+	if _, err = v.Search(ctx, SearchOptions{Query: "x", Match: "some"}); err == nil {
+		t.Fatal("bad match accepted")
+	}
+}

@@ -12,7 +12,8 @@ import (
 )
 
 type SearchOptions struct {
-	Query       string         `json:"query" jsonschema:"Keywords separated by spaces; every keyword must match. Chinese needs no spaces."`
+	Query       string         `json:"query" jsonschema:"Free-form words or a whole question; Chinese needs no spaces. \"double quotes\" mark a phrase that must occur."`
+	Match       string         `json:"match,omitempty" jsonschema:"any (default): notes with at least one query word, best match first; all: every space-separated keyword must match"`
 	PathPrefix  string         `json:"path_prefix,omitempty" jsonschema:"Only notes under this vault-relative directory or path prefix"`
 	Tag         string         `json:"tag,omitempty" jsonschema:"Only notes with this tag or a nested child tag"`
 	Frontmatter map[string]any `json:"frontmatter,omitempty" jsonschema:"Only notes whose frontmatter field equals the value, or whose list field contains it"`
@@ -37,9 +38,25 @@ func (v *Vault) searchDocFor(e *index.Entry) *search.Doc {
 	if d, ok := v.searchDoc[e]; ok {
 		return d
 	}
-	d := search.NewDoc(e.Title, e.Path, e.Tags, e.Document.Body)
+	d := search.NewDoc(e.Title, e.Path, e.Tags, aliases(e), e.Document.Body)
 	v.searchDoc[e] = d
 	return d
+}
+
+// aliases returns the frontmatter aliases of a note as strings.
+func aliases(e *index.Entry) []string {
+	var out []string
+	switch v := e.Document.Fields["aliases"].(type) {
+	case string:
+		out = append(out, v)
+	case []any:
+		for _, item := range v {
+			if s, ok := item.(string); ok {
+				out = append(out, s)
+			}
+		}
+	}
+	return out
 }
 
 func fieldMatches(have, want any) bool {
@@ -57,8 +74,16 @@ func fieldMatches(have, want any) bool {
 // Search ranks notes by BM25. Term statistics are computed from the current
 // catalog snapshot, so changed notes are reindexed lazily on the next query.
 func (v *Vault) Search(ctx context.Context, o SearchOptions) (SearchOutput, error) {
-	q := search.ParseQuery(o.Query)
-	if q.Empty() {
+	mode := search.Mode(o.Match)
+	switch mode {
+	case "":
+		mode = search.Any
+	case search.Any, search.All:
+	default:
+		return SearchOutput{}, errors.New(`match must be "any" or "all"`)
+	}
+	q := search.ParseQuery(o.Query, mode)
+	if q.Blank() {
 		return SearchOutput{}, errors.New("query must contain at least one keyword")
 	}
 	limit := o.Limit
@@ -110,7 +135,11 @@ func (v *Vault) Search(ctx context.Context, o SearchOptions) (SearchOutput, erro
 		entries, docs = append(entries, e), append(docs, d)
 	}
 	v.searchDoc = live // drop documents of changed or deleted notes
-	hits := search.Rank(docs, q)
+	prior := make([]float64, len(entries))
+	for i, e := range entries {
+		prior[i] = float64(len(s.Backlinks[e.Path]))
+	}
+	hits := search.Rank(docs, q, prior)
 	out := SearchOutput{Results: []SearchResult{}, Total: len(hits)}
 	for _, h := range hits[:min(limit, len(hits))] {
 		e := entries[h.Index]
